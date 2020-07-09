@@ -2,7 +2,7 @@
 
 /*Protocol types according to the standard*/
 #define IPPROTO_TCP 6
-#define IPPROTO_UDP 17
+#define N_SESSIONS  100000
 
 /*Session identifier*/
 struct session_key {
@@ -10,17 +10,6 @@ struct session_key {
     __be32 daddr;                                   //IP dest address
     __be16 sport;                                   //Source port
     __be16 dport;                                   //Dest port
-    __u8   proto;                                   //Protocol ID
-} __attribute__((packed));
-
-struct session_value {
-    unsigned long one;
-    unsigned long two;
-    unsigned long three;
-    unsigned long four;
-    unsigned long five;
-    unsigned long six;
-    unsigned long seven;
 } __attribute__((packed));
 
 /*Ethernet Header => https://github.com/torvalds/linux/blob/master/include/uapi/linux/if_ether.h (slightly different)*/
@@ -90,7 +79,7 @@ struct tcphdr {
 } __attribute__((packed));
 
 BPF_PERF_OUTPUT(skb_events);
-BPF_TABLE("lru_hash", struct session_key, uint8_t , HTTP_SESSIONS, 100);
+BPF_TABLE("lru_hash", struct session_key, uint8_t , HTTP_SESSIONS, 100000);
 
 int handle_ingress(struct CTXTYPE *ctx) {
     void *data = (void *) (long) ctx->data;
@@ -151,27 +140,22 @@ int handle_ingress(struct CTXTYPE *ctx) {
     //Looking only for requests
     //GET
     if ((payload[0] == 'G') && (payload[1] == 'E') && (payload[2] == 'T')) {
-        req = 2;
         goto HTTP_MATCH;
     }
     //POST
     if ((payload[0] == 'P') && (payload[1] == 'O') && (payload[2] == 'S') && (payload[3] == 'T')) {
-        req = 3;
         goto HTTP_MATCH;
     }
     //PUT
     if ((payload[0] == 'P') && (payload[1] == 'U') && (payload[2] == 'T')) {
-        req = 4;
         goto HTTP_MATCH;
     }
     //DELETE
     if ((payload[0] == 'D') && (payload[1] == 'E') && (payload[2] == 'L') && (payload[3] == 'E') && (payload[4] == 'T') && (payload[5] == 'E')) {
-        req = 5;
         goto HTTP_MATCH;
     }
     //HEAD
     if ((payload[0] == 'H') && (payload[1] == 'E') && (payload[2] == 'A') && (payload[3] == 'D')) {
-        req = 6;
         goto HTTP_MATCH;
     }
 
@@ -232,13 +216,11 @@ int handle_egress(struct CTXTYPE *ctx) {
         payload[j] = load_byte(ctx , i);
     }
 
-    uint8_t req = 0;
     u32 magic = 0xfaceb00d;
     struct session_key key = {.saddr=ip->daddr, .daddr=ip->saddr, .sport=tcp->dest, .dport=tcp->source};
 
     //Looking only for responses*   
     if ((payload[0] == 'H') && (payload[1] == 'T') && (payload[2] == 'T') && (payload[3] == 'P')) {
-        req = 1;
         goto HTTP_MATCH;
     }
 
