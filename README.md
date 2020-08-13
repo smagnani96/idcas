@@ -6,7 +6,7 @@ As the name says, this tool aims to detect an attack and try to replicate it to 
 
 In fact, the tool can be used to analyze a specific service you have to protect (a particular ip addres accessible from the machine you are going to run the software), looking for incoming attack and replicate them to all the other CTF participants, without even knowing the real attack. 
 
-I created a video tutorial to explain both the architecture and how the system works, making a simple example using a dumb web application which you can find under the [webapp](./webapp) folder.
+I created a video tutorial to explain both the architecture and how the system works, making a simple example using a dumb web application which you can find under the [vuln\_app](./vuln_app) folder.
 
 https://drive.google.com/file/d/1VqbHxWJGEvL9F5-FZHDehtl-ve8maXK4/view?usp=sharing
 
@@ -28,7 +28,7 @@ In the ControlPlane (python script) you can adjust the cleaner thread timer to c
 
 ## Architecture
 
-IDCAS's architecture may seem complex, but actually it is quite simple. There are two eBPF functions defined in [http_filter.c](./src/http_filter.c) that will be inserted in your Linux system and they will handle incoming (INGRESS) and outgoing (PACKETS).
+IDCAS's architecture may seem complex, but actually it is quite simple. There are two eBPF functions defined in [http_filter.c](./src/http_filter.c) that will be inserted in your Linux system and they will handle incoming (INGRESS) and outgoing (EGRESS) packets.
 
 Concerning the Ingress part, every packet that contains an HTTP request (eg. Get, Post,...) and it is designated to a specific service (if specified) will be recorded, and that session (srcIp, dstIp, srcPort, dstPort) will be monitored.
 
