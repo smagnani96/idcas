@@ -1,6 +1,11 @@
-#include <linux/if_vlan.h>
+/*Return codes according to linux kernel/eBPF*/
+#define TC_ACT_OK   0
+#define TC_ACT_SHOT 2
+#define XDP_DROP    1
+#define XDP_PASS    2
 
 /*Protocol types according to the standard*/
+#define ETH_P_IP    0x0800
 #define IPPROTO_TCP 6
 #define N_SESSIONS  100000
 
@@ -79,7 +84,7 @@ struct tcphdr {
 } __attribute__((packed));
 
 BPF_PERF_OUTPUT(skb_events);
-BPF_TABLE("lru_hash", struct session_key, uint8_t , HTTP_SESSIONS, 100000);
+BPF_TABLE("lru_hash", struct session_key, uint8_t , HTTP_SESSIONS, N_SESSIONS);
 
 int handle_ingress(struct CTXTYPE *ctx) {
     void *data = (void *) (long) ctx->data;
@@ -122,51 +127,31 @@ int handle_ingress(struct CTXTYPE *ctx) {
     //avoid invalid access memory
     //include empty payload
     uint32_t tcp_header_len = tcp->doff << 2; //SHL 2 -> *4 multiply
-    uint32_t payload_offset = sizeof(struct eth_hdr) + ip_header_len + tcp_header_len;
     uint32_t payload_length = bpf_htons(ip->tot_len) - ip_header_len - tcp_header_len;
 
     if(payload_length < 7) {
         return PASS;
     }
+
+    uint32_t payload_offset = sizeof(struct eth_hdr) + ip_header_len + tcp_header_len;
     unsigned long payload[7];
     for (int i = payload_offset, j=0 ; j < 7 ; i++, j++) {
         payload[j] = load_byte(ctx , i);
     }
-
-    uint8_t req = 0;
-    u32 magic = 0xfaceb00c;
     struct session_key key = {.saddr=ip->saddr, .daddr=ip->daddr, .sport=tcp->source, .dport=tcp->dest};
 
     //Looking only for requests
-    //GET
-    if ((payload[0] == 'G') && (payload[1] == 'E') && (payload[2] == 'T')) {
-        goto HTTP_MATCH;
-    }
-    //POST
-    if ((payload[0] == 'P') && (payload[1] == 'O') && (payload[2] == 'S') && (payload[3] == 'T')) {
-        goto HTTP_MATCH;
-    }
-    //PUT
-    if ((payload[0] == 'P') && (payload[1] == 'U') && (payload[2] == 'T')) {
-        goto HTTP_MATCH;
-    }
-    //DELETE
-    if ((payload[0] == 'D') && (payload[1] == 'E') && (payload[2] == 'L') && (payload[3] == 'E') && (payload[4] == 'T') && (payload[5] == 'E')) {
-        goto HTTP_MATCH;
-    }
-    //HEAD
-    if ((payload[0] == 'H') && (payload[1] == 'E') && (payload[2] == 'A') && (payload[3] == 'D')) {
-        goto HTTP_MATCH;
+    if (((payload[0] == 'G') && (payload[1] == 'E') && (payload[2] == 'T')) || 
+        ((payload[0] == 'P') && (payload[1] == 'O') && (payload[2] == 'S') && (payload[3] == 'T')) ||
+        ((payload[0] == 'P') && (payload[1] == 'U') && (payload[2] == 'T')) ||
+        ((payload[0] == 'D') && (payload[1] == 'E') && (payload[2] == 'L') && (payload[3] == 'E') && (payload[4] == 'T') && (payload[5] == 'E')) ||
+        ((payload[0] == 'H') && (payload[1] == 'E') && (payload[2] == 'A') && (payload[3] == 'D'))) {
+        u32 ingress_magic = 0xfaceb00c;
+        uint8_t val = 0;
+        HTTP_SESSIONS.update(&key, &val);
+        skb_events.perf_submit_skb(ctx, ctx->len, &ingress_magic, sizeof(ingress_magic));
     }
 
-    //no http match, pass
-    goto NO_MATCH;
-    
-    HTTP_MATCH:
-    HTTP_SESSIONS.update(&key, &req);
-    skb_events.perf_submit_skb(ctx, ctx->len, &magic, sizeof(magic));
-
-    NO_MATCH:
     return PASS;
 }
 
@@ -204,34 +189,25 @@ int handle_egress(struct CTXTYPE *ctx) {
         return PASS;
     
     uint32_t tcp_header_len = tcp->doff << 2; //SHL 2 -> *4 multiply
-    uint32_t payload_offset = sizeof(struct eth_hdr) + ip_header_len + tcp_header_len;
     uint32_t payload_length = bpf_htons(ip->tot_len) - ip_header_len - tcp_header_len;
 
     if(payload_length < 7) {
         return PASS;
     }
 
+    uint32_t payload_offset = sizeof(struct eth_hdr) + ip_header_len + tcp_header_len;
     unsigned long payload[7];
     for (int i = payload_offset, j=0 ; j < 7 ; i++, j++) {
         payload[j] = load_byte(ctx , i);
     }
 
-    u32 magic = 0xfaceb00d;
     struct session_key key = {.saddr=ip->daddr, .daddr=ip->saddr, .sport=tcp->dest, .dport=tcp->source};
 
-    //Looking only for responses*   
-    if ((payload[0] == 'H') && (payload[1] == 'T') && (payload[2] == 'T') && (payload[3] == 'P')) {
-        goto HTTP_MATCH;
+    //Looking only for responses
+    if ((payload[0] == 'H') && (payload[1] == 'T') && (payload[2] == 'T') && (payload[3] == 'P') && HTTP_SESSIONS.lookup(&key)) {
+        u32 egress_magic = 0xfaceb00d;
+        skb_events.perf_submit_skb(ctx, ctx->len, &egress_magic, sizeof(egress_magic));
     }
 
-    //no http match, pass
-    goto NO_MATCH;
-    
-    HTTP_MATCH:
-    if(HTTP_SESSIONS.lookup(&key)) {
-        skb_events.perf_submit_skb(ctx, ctx->len, &magic, sizeof(magic));
-    }
-
-    NO_MATCH:
     return PASS;
 }

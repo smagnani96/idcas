@@ -3,7 +3,8 @@
 
 from bcc import BPF
 from io import StringIO
-import pyroute2, time, socket, argparse, re, struct, threading, urllib3, email, zlib, ctypes as ct
+from string import printable
+import pyroute2, time, socket, argparse, re, struct, threading, urllib3, email, zlib, sys, ctypes as ct
 
 pattern             = ""                       # pattern to look for in the http body
 local_dictionary    = {}                       # local dictionary containing session_key => messages (+ utility variables)
@@ -28,19 +29,27 @@ def decodeMessage(message):
     # payload begins after a white line
     index_payload = message.index(crlf+crlf) + 4
     header = message[:index_payload].decode('utf-8')
-    if len(message) <= index_payload:
+    payload = message[index_payload:]
+    if len(message) <= index_payload or len(payload) <= len(b'\x80\xb1'):
         return header
     
     match = re.search('Content-Encoding: (.*)\\r\\n', header)
-    encoding = match.group(1) if match else 'utf-8' if match else 'utf-8'
-    
-    payload = message[index_payload:]
-    if encoding == 'utf-8': payload = payload.decode('utf-8')
-    elif encoding == 'gzip': payload = zlib.decompress(payload, wbits=zlib.MAX_WBITS|16).decode('utf-8')
-    elif encoding == 'deflate': payload = zlib.decompress(payload, wbits=-zlib.MAX_WBITS).decode('utf-8')
-    elif encoding == 'zlib': payload = zlib.decompress(payload, wbits=zlib.MAX_WBITS).decode('utf-8')
-    else: print(f"Unknown encoding {encoding}")
-    return header + payload
+    decoded = ''
+
+    if match: encoding = match.group(1)
+    else:
+        match2 = re.search('Content-Type: .*charset=(.+)\\r\\n', header)
+        if match2 : encoding = match2.group(1).lower()
+        else: encoding = 'utf-8'
+
+    try:
+        if encoding == 'gzip': decoded = zlib.decompress(payload, wbits=zlib.MAX_WBITS|16).decode('utf-8')
+        elif encoding == 'deflate': decoded = zlib.decompress(payload, wbits=-zlib.MAX_WBITS).decode('utf-8')
+        elif encoding == 'zlib': decoded = zlib.decompress(payload, wbits=zlib.MAX_WBITS).decode('utf-8')
+        else: decoded = payload.decode(encoding, errors='backslashreplace')
+    except:
+        print(f'Unable to decode ({encoding}) message')
+    return header + decoded
 
 
 '''
@@ -101,13 +110,12 @@ def clearOldEntriesTask():
 
 
 '''
-Function to handle eBPF event pushed in the buffer.
-Events refer to HTTP packet received/sent only.
+Function to parse a single packet.
 The packet is completely parsed and depending where it comes from (INGRESS/EGRESS)
 it is stored in the apposite local data structure and many checks are performed to 
 detect possible leakage (flag)
 '''
-def print_skb_event(cpu, data, size):
+def parse_packet(cpu, data, size):
     global local_dictionary
     class SkbEvent(ct.Structure):
         _fields_ =  [ ("magic", ct.c_uint32),
@@ -203,6 +211,17 @@ def print_skb_event(cpu, data, size):
 
 
 '''
+Function to spawn an independent thread to handle a packet in the Control plane.
+Packets come from eBPF events pushed in the buffer.
+Events refer to HTTP packet received/sent only.
+'''
+def handle_controlplane_packet(cpu, data, size):
+    t = threading.Timer(0, parse_packet, (cpu, data, size,))
+    t.daemon = True
+    t.start()
+
+
+'''
 Main function to create and inject programs and start monitoring.
 '''
 def main():
@@ -268,7 +287,7 @@ def main():
             parent="ffff:fff2", classid=1, direct_action=True)
     
     #set the function to be called on event
-    b["skb_events"].open_perf_buffer(print_skb_event)
+    b["skb_events"].open_perf_buffer(handle_controlplane_packet)
     #start cleaner thread
     clearOldEntriesTask()
 
