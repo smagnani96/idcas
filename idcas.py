@@ -263,7 +263,7 @@ def main():
 
     print('Compiling eBPF programs')
     # load BPF program with the variables just set
-    b = BPF(src_file="http_filter.c", debug=0, cflags=["-w", "-DDROP=%s" % ret_ko, "-DPASS=%s" % ret_ok , "-DCTXTYPE=%s" % ctxtype, "-DSERVICE_IP=%s" % service_ip], device=offload_device)
+    b = BPF(src_file="ebpf_filter.c", debug=0, cflags=["-w", "-DDROP=%s" % ret_ko, "-DPASS=%s" % ret_ok , "-DCTXTYPE=%s" % ctxtype, "-DSERVICE_IP=%s" % service_ip], device=offload_device)
     
     # load the compiled functions
     ingress_fn = b.load_func("handle_ingress", mode, offload_device)

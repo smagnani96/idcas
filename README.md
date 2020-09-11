@@ -12,36 +12,32 @@ https://drive.google.com/file/d/1VqbHxWJGEvL9F5-FZHDehtl-ve8maXK4/view?usp=shari
 
 ## Requirements
 
-```python
-from bcc import BPF
-from io import StringIO
-import pyroute2, time, socket, argparse, re, struct, threading, urllib3, email, zlib, ctypes as ct
-```
-
-Many of these dependencies are already satisfied, but you will likely have to install at least:
-
-* bcc
-* pyroute2
+* bcc;
+* pyroute2;
+* urllib3;
+* email;
+* zlib;
+* ctypes.
 
 Concerning eBPF, the only requirement is at least 130Kb for the session map in the DataPlane.
 In the ControlPlane (python script) you can adjust the cleaner thread timer to clear the map as you like. Pay attention that in that dictionary there are at least the 130Kb coming from the DataPlane plus the list of all the HTTP messages intercepted, so the size could reach also 20Mb.
 
 ## Architecture
 
-IDCAS's architecture may seem complex, but actually it is quite simple. There are two eBPF functions defined in [http_filter.c](./src/http_filter.c) that will be inserted in your Linux system and they will handle incoming (INGRESS) and outgoing (EGRESS) packets.
+IDCAS's architecture may seem complex, but actually it is quite simple. There are two eBPF functions defined in [ebpf_filter.c](./ebpf_filter.c) that will be inserted in your Linux system and they will handle incoming (INGRESS) and outgoing (EGRESS) packets.
 
 Concerning the Ingress part, every packet that contains an HTTP request (eg. Get, Post,...) and it is designated to a specific service (if specified) will be recorded, and that session (srcIp, dstIp, srcPort, dstPort) will be monitored.
 
 At this point, the Egress program will record all HTTP response packets belonging to an already tracked session, to make sure not to waste time and mix packets.
 
-When these program records a packet, the ControlPlane contained in [http_filter.py](./src/http_filter.py) will be called to perform many checks and reassemble the HTTP requests/responses. Every time an HTTP response has been correctly reassembled and decompressed, the script looks for a pattern to be contained in the HTTP body, and this is usuallly the flag an attacker has taken from us. At this point, if the pattern is contained in the response body, the script will start forwarding the same attack received to all the VICTIMS_IP, which are the other participants, and wait for a response. If the response contains the pattern, then we have successfully obtained with "no effort" a flag, otherwise something went wrong (they patched the service / there was an error decompressing the request / ...).
+When these program records a packet, the ControlPlane contained in [idcas.py](./idcas.py) will be called to perform many checks and reassemble the HTTP requests/responses. Every time an HTTP response has been correctly reassembled and decompressed, the script looks for a pattern to be contained in the HTTP body, and this is usuallly the flag an attacker has taken from us. At this point, if the pattern is contained in the response body, the script will start forwarding the same attack received to all the VICTIMS_IP, which are the other participants, and wait for a response. If the response contains the pattern, then we have successfully obtained with "no effort" a flag, otherwise something went wrong (they patched the service / there was an error decompressing the request / ...).
 
 Every request is performed using a separated Thread. Moreover, every tot seconds a cleaner Thread is called to delete from the local dictionary in the ControlPlane all the old entries. 
 
 ## Usage
 
 ```bash
-usage: http_filter.py [-h] [-m MODE] [-S] [-H] [-s SERVICE] interface pattern
+usage: idcas.py [-h] [-m MODE] [-S] [-H] [-s SERVICE] interface pattern
 
 positional arguments:
   interface             indicates the interface to attach programs
