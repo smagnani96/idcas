@@ -6,10 +6,6 @@ As the name says, this tool aims to detect an attack and try to replicate it to 
 
 In fact, the tool can be used to analyze a specific service you have to protect (a particular ip addres accessible from the machine you are going to run the software), looking for incoming attack and replicate them to all the other CTF participants, without even knowing the real attack. 
 
-I created a video tutorial to explain both the architecture and how the system works, making a simple example using a dumb web application which you can find under the [vuln\_app](./vuln_app) folder.
-
-https://drive.google.com/file/d/1VqbHxWJGEvL9F5-FZHDehtl-ve8maXK4/view?usp=sharing
-
 ## Requirements
 
 * bcc;
